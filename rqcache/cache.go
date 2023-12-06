@@ -1,16 +1,18 @@
-package geecache
+package rqcache
 
 import (
-	"geecache/lru"
+	"rqcache/lru"
 	"sync"
 )
 
+// 定义缓存结构体
 type cache struct {
-	mu         sync.Mutex
+	mu         sync.Mutex // 互斥锁
 	lru        *lru.Cache
 	cacheBytes int64
 }
 
+// 添加缓存
 func (c *cache) add(key string, value ByteView) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -20,6 +22,7 @@ func (c *cache) add(key string, value ByteView) {
 	c.lru.Add(key, value)
 }
 
+// 获取缓存
 func (c *cache) get(key string) (value ByteView, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

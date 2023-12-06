@@ -1,33 +1,34 @@
-package geecache
+package rqcache
 
 import (
 	"fmt"
-	pb "geecache/geecachepb"
-	"geecache/singleflight"
 	"log"
+	pb "rqcache/rqcachepb"
+	"rqcache/singleflight"
 	"sync"
 )
 
-// A Group is a cache namespace and associated data loaded spread over
+//						   是
+//接收 key --> 检查是否被缓存 -----> 返回缓存值 ⑴
+//		|  否                         是
+//		|-----> 是否应当从远程节点获取 -----> 与远程节点交互 --> 返回缓存值 ⑵
+//						|  否
+//						|-----> 调用`回调函数`，获取值并添加到缓存 --> 返回缓存值 ⑶
+
 type Group struct {
 	name      string
 	getter    Getter
 	mainCache cache
 	peers     PeerPicker
-	// use singleflight.Group to make sure that
-	// each key is only fetched once
-	loader *singleflight.Group
+	loader    *singleflight.Group
 }
 
-// A Getter loads data for a key.
 type Getter interface {
 	Get(key string) ([]byte, error)
 }
 
-// A GetterFunc implements Getter with a function.
 type GetterFunc func(key string) ([]byte, error)
 
-// Get implements Getter interface function
 func (f GetterFunc) Get(key string) ([]byte, error) {
 	return f(key)
 }
@@ -37,7 +38,6 @@ var (
 	groups = make(map[string]*Group)
 )
 
-// NewGroup create a new instance of Group
 func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 	if getter == nil {
 		panic("nil Getter")
@@ -54,8 +54,6 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 	return g
 }
 
-// GetGroup returns the named group previously created with NewGroup, or
-// nil if there's no such group.
 func GetGroup(name string) *Group {
 	mu.RLock()
 	g := groups[name]
@@ -63,21 +61,19 @@ func GetGroup(name string) *Group {
 	return g
 }
 
-// Get value for a key from cache
 func (g *Group) Get(key string) (ByteView, error) {
 	if key == "" {
 		return ByteView{}, fmt.Errorf("key is required")
 	}
 
 	if v, ok := g.mainCache.get(key); ok {
-		log.Println("[GeeCache] hit")
+		log.Println("[RQCache] hit")
 		return v, nil
 	}
 
 	return g.load(key)
 }
 
-// RegisterPeers registers a PeerPicker for choosing remote peer
 func (g *Group) RegisterPeers(peers PeerPicker) {
 	if g.peers != nil {
 		panic("RegisterPeerPicker called more than once")
@@ -86,15 +82,13 @@ func (g *Group) RegisterPeers(peers PeerPicker) {
 }
 
 func (g *Group) load(key string) (value ByteView, err error) {
-	// each key is only fetched once (either locally or remotely)
-	// regardless of the number of concurrent callers.
 	viewi, err := g.loader.Do(key, func() (interface{}, error) {
 		if g.peers != nil {
 			if peer, ok := g.peers.PickPeer(key); ok {
 				if value, err = g.getFromPeer(peer, key); err == nil {
 					return value, nil
 				}
-				log.Println("[GeeCache] Failed to get from peer", err)
+				log.Println("[RQCache] Failed to get from peer", err)
 			}
 		}
 

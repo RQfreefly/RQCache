@@ -1,7 +1,14 @@
 module example
 
-go 1.13
+go 1.21
 
-require geecache v0.0.0
+toolchain go1.21.0
 
-replace geecache => ./geecache
+replace rqcache => ./rqcache
+
+require rqcache v0.0.0-00010101000000-000000000000
+
+require (
+	github.com/golang/protobuf v1.5.0 // indirect
+	google.golang.org/protobuf v1.28.1 // indirect
+)

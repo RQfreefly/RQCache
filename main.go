@@ -1,19 +1,19 @@
 package main
 
 /*
-$ curl "http://localhost:9999/api?key=Tom"
-630
+   $ curl "http://localhost:9999/api?key=Tom"
+   630
 
-$ curl "http://localhost:9999/api?key=kkk"
-kkk not exist
+   $ curl "http://localhost:9999/api?key=kkk"
+   kkk not exist
 */
 
 import (
 	"flag"
 	"fmt"
-	"geecache"
 	"log"
 	"net/http"
+	"rqcache"
 )
 
 var db = map[string]string{
@@ -22,8 +22,8 @@ var db = map[string]string{
 	"Sam":  "567",
 }
 
-func createGroup() *geecache.Group {
-	return geecache.NewGroup("scores", 2<<10, geecache.GetterFunc(
+func createGroup() *rqcache.Group {
+	return rqcache.NewGroup("scores", 2<<10, rqcache.GetterFunc(
 		func(key string) ([]byte, error) {
 			log.Println("[SlowDB] search key", key)
 			if v, ok := db[key]; ok {
@@ -33,15 +33,15 @@ func createGroup() *geecache.Group {
 		}))
 }
 
-func startCacheServer(addr string, addrs []string, gee *geecache.Group) {
-	peers := geecache.NewHTTPPool(addr)
+func startCacheServer(addr string, addrs []string, gee *rqcache.Group) {
+	peers := rqcache.NewHTTPPool(addr)
 	peers.Set(addrs...)
 	gee.RegisterPeers(peers)
 	log.Println("geecache is running at", addr)
 	log.Fatal(http.ListenAndServe(addr[7:], peers))
 }
 
-func startAPIServer(apiAddr string, gee *geecache.Group) {
+func startAPIServer(apiAddr string, gee *rqcache.Group) {
 	http.Handle("/api", http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			key := r.URL.Query().Get("key")

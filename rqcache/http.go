@@ -1,35 +1,35 @@
-package geecache
+package rqcache
 
 import (
 	"fmt"
-	"geecache/consistenthash"
-	pb "geecache/geecachepb"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
+	"rqcache/consistenthash"
+	pb "rqcache/rqcachepb"
 	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
 )
 
+// 默认的基本路径和副本数量
 const (
-	defaultBasePath = "/_geecache/"
+	defaultBasePath = "/_rqcache/"
 	defaultReplicas = 50
 )
 
-// HTTPPool implements PeerPicker for a pool of HTTP peers.
+// HTTPPool 实现了 PeerPicker 接口，用于管理一组 HTTP 同伴节点。
 type HTTPPool struct {
-	// this peer's base URL, e.g. "https://example.net:8000"
-	self        string
-	basePath    string
-	mu          sync.Mutex // guards peers and httpGetters
-	peers       *consistenthash.Map
-	httpGetters map[string]*httpGetter // keyed by e.g. "http://10.0.0.2:8008"
+	self        string                 // 当前节点的基本 URL，例如 "https://example.net:8000"
+	basePath    string                 // HTTP 路由的基本路径
+	mu          sync.Mutex             // 保护 peers 和 httpGetters 的并发访问
+	peers       *consistenthash.Map    // 一致性哈希算法的实例，用于选择节点
+	httpGetters map[string]*httpGetter // 同伴节点的 HTTP 客户端，按格式 "http://10.0.0.2:8008" 进行索引
 }
 
-// NewHTTPPool initializes an HTTP pool of peers.
+// NewHTTPPool 初始化一个 HTTP 同伴节点池。
 func NewHTTPPool(self string) *HTTPPool {
 	return &HTTPPool{
 		self:     self,
@@ -37,21 +37,21 @@ func NewHTTPPool(self string) *HTTPPool {
 	}
 }
 
-// Log info with server name
+// Log 使用服务器名称记录信息
 func (p *HTTPPool) Log(format string, v ...interface{}) {
-	log.Printf("[Server %s] %s", p.self, fmt.Sprintf(format, v...))
+	log.Printf("[服务器 %s] %s", p.self, fmt.Sprintf(format, v...))
 }
 
-// ServeHTTP handle all http requests
+// ServeHTTP 处理所有 HTTP 请求
 func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.URL.Path, p.basePath) {
-		panic("HTTPPool serving unexpected path: " + r.URL.Path)
+		panic("HTTPPool 服务意外的路径：" + r.URL.Path)
 	}
 	p.Log("%s %s", r.Method, r.URL.Path)
-	// /<basepath>/<groupname>/<key> required
+	// /<basepath>/<groupname>/<key> 是必需的
 	parts := strings.SplitN(r.URL.Path[len(p.basePath):], "/", 2)
 	if len(parts) != 2 {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		http.Error(w, "错误的请求", http.StatusBadRequest)
 		return
 	}
 
@@ -60,7 +60,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	group := GetGroup(groupName)
 	if group == nil {
-		http.Error(w, "no such group: "+groupName, http.StatusNotFound)
+		http.Error(w, "没有该组："+groupName, http.StatusNotFound)
 		return
 	}
 
@@ -70,7 +70,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Write the value to the response body as a proto message.
+	// 将值以 proto 消息的形式写入响应体
 	body, err := proto.Marshal(&pb.Response{Value: view.ByteSlice()})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -81,7 +81,7 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(body)
 }
 
-// Set updates the pool's list of peers.
+// Set 更新节点池的同伴列表
 func (p *HTTPPool) Set(peers ...string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -93,23 +93,26 @@ func (p *HTTPPool) Set(peers ...string) {
 	}
 }
 
-// PickPeer picks a peer according to key
+// PickPeer 根据键选择一个同伴节点
 func (p *HTTPPool) PickPeer(key string) (PeerGetter, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if peer := p.peers.Get(key); peer != "" && peer != p.self {
-		p.Log("Pick peer %s", peer)
+		p.Log("选择同伴节点 %s", peer)
 		return p.httpGetters[peer], true
 	}
 	return nil, false
 }
 
+// PeerPicker 接口的实现，表示可以选择一个同伴节点
 var _ PeerPicker = (*HTTPPool)(nil)
 
+// httpGetter 实现了 PeerGetter 接口，表示通过 HTTP 获取值的客户端
 type httpGetter struct {
 	baseURL string
 }
 
+// Get 通过 HTTP 获取值的实现
 func (h *httpGetter) Get(in *pb.Request, out *pb.Response) error {
 	u := fmt.Sprintf(
 		"%v%v/%v",
@@ -124,19 +127,20 @@ func (h *httpGetter) Get(in *pb.Request, out *pb.Response) error {
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned: %v", res.Status)
+		return fmt.Errorf("服务器返回: %v", res.Status)
 	}
 
 	bytes, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		return fmt.Errorf("reading response body: %v", err)
+		return fmt.Errorf("读取响应体：%v", err)
 	}
 
 	if err = proto.Unmarshal(bytes, out); err != nil {
-		return fmt.Errorf("decoding response body: %v", err)
+		return fmt.Errorf("解码响应体：%v", err)
 	}
 
 	return nil
 }
 
+// PeerGetter 接口的实现，表示可以通过 HTTP 获取值
 var _ PeerGetter = (*httpGetter)(nil)
